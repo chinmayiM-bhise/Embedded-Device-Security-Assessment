@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+click
+python-magic
+pytest
+pydantic
+python-multipart
+yara-python
+fpdf
+cvss
+pyelftools
+sqlalchemy

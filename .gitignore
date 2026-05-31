@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+venv_wsl/
+.pytest_cache/
+
+# Project specific
+results/
+uploads/
+cli_results/
+cli_test_results/
+cli_test_v1.1/
+iot_scanner.db
+progress.txt
+
+# OS
+.DS_Store
+Thumbs.db

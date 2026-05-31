@@ -1,0 +1,112 @@
+{
+  "BusyBox": [
+    {
+      "id": "CVE-2022-28391",
+      "severity": "High",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:H",
+      "description": "Buffer overflow in BusyBox netstat."
+    },
+    {
+      "id": "CVE-2021-28718",
+      "severity": "Medium",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L",
+      "description": "Arbitrary code execution in BusyBox udhcp."
+    },
+    {
+      "id": "CVE-2018-1000500",
+      "severity": "High",
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "description": "Denial of service in BusyBox wget via malformed HTTP headers."
+    },
+    {
+      "id": "CVE-2021-42374",
+      "severity": "Medium",
+      "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+      "description": "Out-of-bounds read in BusyBox awk."
+    }
+  ],
+
+  "OpenSSL": [
+    {
+      "id": "CVE-2023-0286",
+      "severity": "High",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+      "description": "Type confusion in X.400 address processing."
+    },
+    {
+      "id": "CVE-2022-0778",
+      "severity": "Critical",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "description": "Infinite loop in BN_mod_sqrt() function."
+    },
+    {
+      "id": "CVE-2021-3711",
+      "severity": "Critical",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "description": "Buffer overflow in SM2 decryption."
+    },
+    {
+      "id": "CVE-2016-2107",
+      "severity": "High",
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+      "description": "Padding oracle vulnerability in AES-NI CBC MAC."
+    }
+  ],
+
+  "Linux Kernel": [
+    {
+      "id": "CVE-2024-1086",
+      "severity": "Critical",
+      "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+      "description": "Netfilter local privilege escalation vulnerability."
+    },
+    {
+      "id": "CVE-2022-0847",
+      "severity": "Critical",
+      "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+      "description": "Dirty Pipe vulnerability allowing privilege escalation."
+    },
+    {
+      "id": "CVE-2021-3493",
+      "severity": "High",
+      "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+      "description": "OverlayFS privilege escalation vulnerability."
+    }
+  ],
+
+  "Dropbear": [
+    {
+      "id": "CVE-2018-15599",
+      "severity": "High",
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "description": "Username enumeration vulnerability in Dropbear SSH."
+    }
+  ],
+
+  "dnsmasq": [
+    {
+      "id": "CVE-2020-25681",
+      "severity": "High",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "description": "DNS cache poisoning vulnerability."
+    }
+  ],
+
+  "uClibc": [
+    {
+      "id": "CVE-2022-29503",
+      "severity": "High",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "description": "Heap buffer overflow in uClibc."
+    }
+  ],
+
+  "lighttpd": [
+    {
+      "id": "CVE-2014-2323",
+      "severity": "Medium",
+      "cvss_vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+      "description": "Directory traversal vulnerability."
+    }
+  ]
+}

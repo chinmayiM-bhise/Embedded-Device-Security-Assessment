@@ -1,0 +1,79 @@
+import click
+import os
+import json
+import uuid
+import logging
+from iot_scanner.core.extractor import extract_firmware
+from iot_scanner.core.secret_scanner import SecretScanner
+from iot_scanner.core.static_analyzer import StaticAnalyzer
+from iot_scanner.core.vulnerability_scanner import VulnerabilityScanner
+from iot_scanner.core.hardening_analyzer import HardeningAnalyzer
+from iot_scanner.core.malware_scanner import MalwareScanner
+from iot_scanner.core.binary_scanner import BinaryScanner
+from iot_scanner.core.report_generator import generate_pdf_report
+from iot_scanner.core.database import save_scan
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+@click.group()
+def cli():
+    """IoT Firmware Security Scanner - Enterprise CLI"""
+    pass
+
+@cli.command()
+@click.argument('firmware_path', type=click.Path(exists=True))
+@click.option('--output', '-o', default='cli_results', help='Output directory.')
+def scan(firmware_path, output):
+    """Run a full enterprise security audit on a firmware file."""
+    scan_id = str(uuid.uuid4())
+    filename = os.path.basename(firmware_path)
+    
+    if not os.path.exists(output): os.makedirs(output)
+    extracted_dir = os.path.join(output, "extracted")
+    
+    try:
+        click.echo(f"[*] Starting Audit: {filename} (ID: {scan_id})")
+        
+        # 0. Forensics
+        bin_results = BinaryScanner(firmware_path).run_scan()
+        
+        # 1. Extraction
+        extract_firmware(firmware_path, extracted_dir)
+        
+        # 2-6. Deep Scanning
+        secrets = SecretScanner(extracted_dir).scan_directory()
+        statics = StaticAnalyzer(extracted_dir).run_analysis()
+        vulns = VulnerabilityScanner(extracted_dir).run_scan()
+        harden = HardeningAnalyzer(extracted_dir).run_analysis()
+        malware = MalwareScanner(extracted_dir).run_scan()
+        
+        final_results = {
+            "firmware": filename,
+            "binary_analysis": bin_results,
+            "secrets": secrets,
+            "static_analysis": statics,
+            "vulnerability_scan": vulns,
+            "hardening_analysis": harden,
+            "malware_analysis": malware
+        }
+        
+        # Save Results
+        with open(os.path.join(output, "results.json"), 'w') as f:
+            json.dump(final_results, f, indent=4)
+            
+        # Generate PDF
+        pdf_path = os.path.join(output, "audit_report.pdf")
+        generate_pdf_report(final_results, pdf_path)
+        
+        # Save to DB
+        save_scan(scan_id, filename, final_results)
+        
+        click.echo(f"[*] Audit Complete! PDF Report: {pdf_path}")
+        click.echo(f"[*] Scan ID saved to database: {scan_id}")
+        
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+
+if __name__ == '__main__':
+    cli()
