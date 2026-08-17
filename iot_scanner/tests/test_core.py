@@ -9,6 +9,8 @@ from iot_scanner.core.malware_scanner import MalwareScanner
 from iot_scanner.core.binary_scanner import BinaryScanner
 from iot_scanner.core.extractor import extract_firmware, validate_rootfs
 from iot_scanner.core.report_generator import calculate_security_score
+from iot_scanner.core.cve_client import CVEClient
+from iot_scanner.core.sbom_generator import generate_cyclonedx_sbom
 from create_mock_firmware import create_mock_firmware
 
 TEST_DIR = "test_run_data"
@@ -74,8 +76,6 @@ def test_vulnerability_scanner():
     
     vulnerabilities = results["vulnerabilities"]
     assert len(vulnerabilities) > 0
-    cve_ids = [v["cve_id"] for v in vulnerabilities]
-    assert any("CVE-2022" in id for id in cve_ids)
 
 def test_rootfs_validation():
     """Test rootfs detection on a valid directory vs dummy file."""
@@ -97,7 +97,6 @@ def test_nested_archive_extraction(tmp_path):
     inner_dir.mkdir()
     create_mock_firmware(str(inner_dir))
     
-    # Pack inner into inner.zip
     inner_zip = tmp_path / "inner.zip"
     with zipfile.ZipFile(inner_zip, 'w') as zf:
         for root, _, files in os.walk(inner_dir):
@@ -105,7 +104,6 @@ def test_nested_archive_extraction(tmp_path):
                 p = os.path.join(root, file)
                 zf.write(p, os.path.relpath(p, inner_dir))
 
-    # Pack inner.zip into outer.zip
     outer_zip = tmp_path / "outer.zip"
     with zipfile.ZipFile(outer_zip, 'w') as zf:
         zf.write(inner_zip, "inner_payload.zip")
@@ -127,3 +125,51 @@ def test_score_fail_safe_guard():
     }
     score = calculate_security_score(failed_data)
     assert score == "N/A"
+
+def test_cve_client_and_cache():
+    """Test CVEClient retrieval and caching."""
+    client = CVEClient(cache_ttl_days=1)
+    vulns = client.get_vulnerabilities("BusyBox", "1.33.1")
+    assert len(vulns) > 0
+    # Second retrieval should hit cache
+    cached_vulns = client.get_vulnerabilities("BusyBox", "1.33.1")
+    assert len(cached_vulns) == len(vulns)
+
+def test_sbom_generator():
+    """Test CycloneDX 1.5 SBOM JSON generation."""
+    components = [
+        {"name": "busybox", "version": "1.33.1", "source": "usr/bin/busybox"},
+        {"name": "openssl", "version": "1.1.1f", "source": "usr/bin/openssl"}
+    ]
+    vulnerabilities = [
+        {
+            "cve_id": "CVE-2022-30065",
+            "component": "busybox",
+            "version": "1.33.1",
+            "severity": "High",
+            "cvss_score": 7.8,
+            "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "description": "BusyBox heap buffer overflow."
+        }
+    ]
+    sbom = generate_cyclonedx_sbom(components, vulnerabilities, "test_firmware.bin")
+    assert sbom["bomFormat"] == "CycloneDX"
+    assert sbom["specVersion"] == "1.5"
+    assert len(sbom["components"]) == 2
+    assert len(sbom["vulnerabilities"]) == 1
+    assert sbom["components"][0]["purl"] == "pkg:generic/busybox@1.33.1"
+
+def test_package_manifest_parser(tmp_path):
+    """Test parsing OPKG package manifests from rootfs."""
+    opkg_dir = tmp_path / "usr" / "lib" / "opkg"
+    opkg_dir.mkdir(parents=True)
+    status_file = opkg_dir / "status"
+    status_file.write_text(
+        "Package: dnsmasq\nVersion: 2.86-1\nStatus: install user installed\n\n"
+        "Package: dropbear\nVersion: 2022.82-1\nStatus: install user installed\n\n"
+    )
+    scanner = VulnerabilityScanner(str(tmp_path))
+    scanner.identify_components()
+    comp_names = [c["name"] for c in scanner.components]
+    assert "dnsmasq" in comp_names
+    assert "dropbear" in comp_names

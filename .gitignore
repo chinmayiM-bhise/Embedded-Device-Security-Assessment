@@ -13,7 +13,7 @@ cli_results/
 cli_test_results/
 cli_test_v1.1/
 iot_scanner.db
-progress.txt
+*.db
 
 # OS
 .DS_Store

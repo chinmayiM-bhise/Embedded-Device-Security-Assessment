@@ -11,6 +11,7 @@ from iot_scanner.core.hardening_analyzer import HardeningAnalyzer
 from iot_scanner.core.malware_scanner import MalwareScanner
 from iot_scanner.core.binary_scanner import BinaryScanner
 from iot_scanner.core.report_generator import generate_pdf_report, calculate_security_score
+from iot_scanner.core.sbom_generator import generate_cyclonedx_sbom, save_sbom_json
 from iot_scanner.core.database import save_scan
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -73,13 +74,22 @@ def scan(firmware_path, output):
         
         final_results["security_score"] = calculate_security_score(final_results)
         
-        # Save Results
+        # Save Results JSON
         with open(os.path.join(output, "results.json"), 'w') as f:
             json.dump(final_results, f, indent=4)
             
-        # Generate PDF
+        # Generate PDF Report
         pdf_path = os.path.join(output, "audit_report.pdf")
         generate_pdf_report(final_results, pdf_path)
+
+        # Generate CycloneDX SBOM
+        sbom_data = generate_cyclonedx_sbom(
+            components=vulns.get("components", []),
+            vulnerabilities=vulns.get("vulnerabilities", []),
+            firmware_name=filename
+        )
+        sbom_path = os.path.join(output, "sbom_cyclonedx.json")
+        save_sbom_json(sbom_data, sbom_path)
         
         # Save to DB
         save_scan(scan_id, filename, final_results)
@@ -87,6 +97,7 @@ def scan(firmware_path, output):
         score_display = f"{final_results['security_score']}/100" if final_results['security_score'] != "N/A" else "N/A (Extraction Incomplete)"
         click.echo(f"[*] Audit Complete! Security Score: {score_display}")
         click.echo(f"[*] PDF Report: {pdf_path}")
+        click.echo(f"[*] CycloneDX SBOM: {sbom_path}")
         click.echo(f"[*] Results JSON: {os.path.join(output, 'results.json')}")
         click.echo(f"[*] Scan ID saved to database: {scan_id}")
         

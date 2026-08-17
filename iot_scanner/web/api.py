@@ -15,12 +15,13 @@ from iot_scanner.core.hardening_analyzer import HardeningAnalyzer
 from iot_scanner.core.malware_scanner import MalwareScanner
 from iot_scanner.core.binary_scanner import BinaryScanner
 from iot_scanner.core.report_generator import generate_pdf_report, calculate_security_score
+from iot_scanner.core.sbom_generator import generate_cyclonedx_sbom, save_sbom_json
 from iot_scanner.core.database import save_scan, get_all_scans
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="IoT Firmware Security Scanner")
+app = FastAPI(title="IoT Firmware Security Scanner", version="1.2.0")
 app.mount("/static", StaticFiles(directory="iot_scanner/web/static"), name="static")
 
 UPLOAD_DIR = "uploads"
@@ -68,15 +69,27 @@ def run_scan_task(scan_id: str, firmware_path: str, filename: str):
         
         final_results["security_score"] = calculate_security_score(final_results)
 
+        # Generate Enterprise PDF Report
         pdf_path = os.path.join(output_dir, "report.pdf")
         generate_pdf_report(final_results, pdf_path)
 
+        # Generate CycloneDX 1.5 JSON SBOM
+        sbom_data = generate_cyclonedx_sbom(
+            components=vulns.get("components", []),
+            vulnerabilities=vulns.get("vulnerabilities", []),
+            firmware_name=filename
+        )
+        sbom_path = os.path.join(output_dir, "sbom_cyclonedx.json")
+        save_sbom_json(sbom_data, sbom_path)
+
+        # Save to database
         save_scan(scan_id, filename, final_results)
         
         scans[scan_id].update({
             "status": "Completed",
             "results": final_results,
             "pdf_url": f"/download/{scan_id}",
+            "sbom_url": f"/sbom/{scan_id}",
             "extraction_status": extraction_meta.get("status", "SUCCESS"),
             "has_rootfs": has_rootfs
         })
@@ -116,6 +129,13 @@ async def download(scan_id: str):
     if os.path.exists(path):
         return FileResponse(path, filename="Security_Audit_Report.pdf")
     raise HTTPException(status_code=404)
+
+@app.get("/sbom/{scan_id}")
+async def download_sbom(scan_id: str):
+    path = os.path.join(RESULTS_DIR, scan_id, "sbom_cyclonedx.json")
+    if os.path.exists(path):
+        return FileResponse(path, filename="CycloneDX_SBOM.json", media_type="application/json")
+    raise HTTPException(status_code=404, detail="SBOM not generated for this scan.")
 
 @app.get("/history")
 async def history():
