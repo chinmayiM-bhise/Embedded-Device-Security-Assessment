@@ -1,0 +1,15 @@
+services:
+  iot-scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iot-firmware-scanner
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./results:/app/results
+      - ./uploads:/app/uploads
+      - ./iot_scanner.db:/app/iot_scanner.db
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
