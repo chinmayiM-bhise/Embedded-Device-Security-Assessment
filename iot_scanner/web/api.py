@@ -17,7 +17,7 @@ from iot_scanner.core.binary_scanner import BinaryScanner
 from iot_scanner.core.report_generator import generate_pdf_report, calculate_security_score
 from iot_scanner.core.sbom_generator import generate_cyclonedx_sbom, save_sbom_json
 from iot_scanner.core.compliance import evaluate_owasp_compliance
-from iot_scanner.core.database import save_scan, get_all_scans
+from iot_scanner.core.database import save_scan, get_all_scans, get_scan
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -123,7 +123,10 @@ async def status(scan_id: str):
 async def results(scan_id: str):
     if scan_id in scans and scans[scan_id]["status"] == "Completed":
         return scans[scan_id]["results"]
-    raise HTTPException(status_code=404)
+    db_scan = get_scan(scan_id)
+    if db_scan and db_scan.results:
+        return db_scan.results
+    raise HTTPException(status_code=404, detail="Scan results not found")
 
 @app.get("/download/{scan_id}")
 async def download(scan_id: str):
@@ -135,6 +138,25 @@ async def download(scan_id: str):
 @app.get("/sbom/{scan_id}")
 async def download_sbom(scan_id: str):
     path = os.path.join(RESULTS_DIR, scan_id, "sbom_cyclonedx.json")
+    if not os.path.exists(path):
+        res = None
+        if scan_id in scans and "results" in scans[scan_id]:
+            res = scans[scan_id]["results"]
+        else:
+            db_scan = get_scan(scan_id)
+            if db_scan and db_scan.results:
+                res = db_scan.results
+
+        if res:
+            vulns = res.get("vulnerability_scan", {})
+            sbom_data = generate_cyclonedx_sbom(
+                components=vulns.get("components", []),
+                vulnerabilities=vulns.get("vulnerabilities", []),
+                firmware_name=res.get("firmware", "firmware.bin")
+            )
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            save_sbom_json(sbom_data, path)
+
     if os.path.exists(path):
         return FileResponse(path, filename="CycloneDX_SBOM.json", media_type="application/json")
     raise HTTPException(status_code=404, detail="SBOM not generated for this scan.")

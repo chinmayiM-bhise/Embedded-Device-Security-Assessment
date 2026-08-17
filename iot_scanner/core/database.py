@@ -37,3 +37,11 @@ def get_all_scans():
         return scans
     finally:
         session.close()
+
+def get_scan(scan_id):
+    session = Session()
+    try:
+        return session.query(ScanResult).filter(ScanResult.id == scan_id).first()
+    finally:
+        session.close()
+
