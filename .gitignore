@@ -14,6 +14,8 @@ cli_test_results/
 cli_test_v1.1/
 iot_scanner.db
 *.db
+progress.txt
+README_v1.0.md
 
 # OS
 .DS_Store
