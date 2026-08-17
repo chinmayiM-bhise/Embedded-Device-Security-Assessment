@@ -14,7 +14,7 @@ from iot_scanner.core.vulnerability_scanner import VulnerabilityScanner
 from iot_scanner.core.hardening_analyzer import HardeningAnalyzer
 from iot_scanner.core.malware_scanner import MalwareScanner
 from iot_scanner.core.binary_scanner import BinaryScanner
-from iot_scanner.core.report_generator import generate_pdf_report
+from iot_scanner.core.report_generator import generate_pdf_report, calculate_security_score
 from iot_scanner.core.database import save_scan, get_all_scans
 
 logging.basicConfig(level=logging.INFO)
@@ -40,29 +40,24 @@ def run_scan_task(scan_id: str, firmware_path: str, filename: str):
         bin_results = BinaryScanner(firmware_path).run_scan()
 
         scans[scan_id]["status"] = "Extracting"
-        extract_firmware(firmware_path, extracted_dir)
-
-        # Check if extraction actually produced files
-        files_found = 0
-        for root, _, files in os.walk(extracted_dir):
-            files_found += len(files)
-        
-        if files_found == 0:
-            logger.warning(f"No files extracted from {filename}")
-            
-            scans[scan_id]["extraction_empty"] = True
-        else:
-            scans[scan_id]["extraction_empty"] = False
+        extraction_meta = extract_firmware(firmware_path, extracted_dir)
+        target_scan_dir = extraction_meta.get("rootfs_dir", extracted_dir)
+        has_rootfs = extraction_meta.get("has_rootfs", False)
 
         scans[scan_id]["status"] = "Scanning"
-        secrets = SecretScanner(extracted_dir).scan_directory()
-        statics = StaticAnalyzer(extracted_dir).run_analysis()
-        vulns = VulnerabilityScanner(extracted_dir).run_scan()
-        harden = HardeningAnalyzer(extracted_dir).run_analysis()
-        malware = MalwareScanner(extracted_dir).run_scan()
+        
+        # Deep inspection of extracted rootfs
+        secrets = SecretScanner(target_scan_dir).scan_directory() if extraction_meta["total_files"] > 0 else []
+        statics = StaticAnalyzer(target_scan_dir).run_analysis() if has_rootfs else []
+        vulns = VulnerabilityScanner(target_scan_dir).run_scan() if extraction_meta["total_files"] > 0 else {"components": [], "vulnerabilities": []}
+        harden = HardeningAnalyzer(target_scan_dir).run_analysis() if extraction_meta["total_files"] > 0 else []
+        malware = MalwareScanner(target_scan_dir).run_scan() if extraction_meta["total_files"] > 0 else []
 
         final_results = {
             "firmware": filename,
+            "extraction_status": extraction_meta.get("status", "SUCCESS"),
+            "has_rootfs": has_rootfs,
+            "total_files_extracted": extraction_meta.get("total_files", 0),
             "binary_analysis": bin_results,
             "secrets": secrets,
             "static_analysis": statics,
@@ -71,24 +66,23 @@ def run_scan_task(scan_id: str, firmware_path: str, filename: str):
             "malware_analysis": malware
         }
         
-        from iot_scanner.core.report_generator import calculate_security_score
         final_results["security_score"] = calculate_security_score(final_results)
 
-        
         pdf_path = os.path.join(output_dir, "report.pdf")
         generate_pdf_report(final_results, pdf_path)
 
-        
         save_scan(scan_id, filename, final_results)
         
         scans[scan_id].update({
             "status": "Completed",
             "results": final_results,
-            "pdf_url": f"/download/{scan_id}"
+            "pdf_url": f"/download/{scan_id}",
+            "extraction_status": extraction_meta.get("status", "SUCCESS"),
+            "has_rootfs": has_rootfs
         })
 
     except Exception as e:
-        logger.error(f"Scan failed: {e}")
+        logger.error(f"Scan failed: {e}", exc_info=True)
         scans[scan_id]["status"] = "Failed"
         scans[scan_id]["error"] = str(e)
 
@@ -106,7 +100,8 @@ async def upload(background_tasks: BackgroundTasks, file: UploadFile = File(...)
 async def status(scan_id: str):
     res = scans.get(scan_id, {"status": "Not Found"})
     if scan_id in scans:
-        res["extraction_empty"] = scans[scan_id].get("extraction_empty", False)
+        res["extraction_empty"] = not scans[scan_id].get("has_rootfs", True)
+        res["extraction_status"] = scans[scan_id].get("extraction_status", "UNKNOWN")
     return res
 
 @app.get("/results/{scan_id}")

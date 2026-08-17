@@ -93,7 +93,7 @@
         }
         button.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
 
-        .hidden { display: none; }
+        .hidden { display: none !important; }
         
         /* Badges */
         .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
@@ -140,9 +140,17 @@
 
             <!-- Page: Dashboard -->
             <div id="page-dashboard" class="page">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 30px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
                     <h2 id="dashTitle">System Overview</h2>
                     <div id="scoreBadge" class="val" style="color: var(--accent); font-size: 24px; font-weight: 800;">---</div>
+                </div>
+
+                <!-- Alert Banner for Incomplete Extraction -->
+                <div id="extractionAlert" class="hidden" style="margin-bottom: 25px; padding: 16px; border-radius: 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid var(--danger); color: #fca5a5;">
+                    <strong style="font-size: 15px;">⚠️ Extraction Notice: Filesystem Unparseable / Encrypted Image</strong>
+                    <p style="margin: 6px 0 0 0; font-size: 13px; color: #cbd5e1;">
+                        The scanner could not decompress an internal Linux root filesystem from this firmware. The file is likely encrypted (e.g. TP-Link Deco, Netgear Armor), digitally signed, or packaged with proprietary vendor bootloader headers. Deep component and vulnerability checks were skipped to prevent false security metrics.
+                    </p>
                 </div>
 
                 <div class="stats-grid">
@@ -179,23 +187,23 @@
                 <!-- Row 3: Secrets & Forensics -->
                 <div class="row">
                     <div class="widget">
-                        <h3>Credential & Key Discovery (Entropy + Regex)</h3>
-                        <div id="secretList" style="max-height: 400px; overflow-y: auto;">---</div>
+                        <h3>Secrets & Credentials</h3>
+                        <div id="secretList" style="max-height: 300px; overflow-y: auto;">---</div>
                     </div>
                     <div class="widget">
-                        <h3>Forensics & Embedded Risks</h3>
-                        <div id="forensicList" style="max-height: 400px; overflow-y: auto;">---</div>
+                        <h3>Binary Forensics</h3>
+                        <div id="forensicList" style="max-height: 300px; overflow-y: auto;">---</div>
                     </div>
                 </div>
             </div>
 
             <!-- Page: History -->
             <div id="page-history" class="page hidden">
-                <h2>Audit History</h2>
+                <h2>Scan History</h2>
                 <div class="widget">
-                    <table id="historyTable">
+                    <table>
                         <thead>
-                            <tr><th>Scan Date</th><th>Firmware Name</th><th>Status</th><th>Action</th></tr>
+                            <tr><th>Date</th><th>Firmware</th><th>Status</th><th>Action</th></tr>
                         </thead>
                         <tbody id="historyBody"></tbody>
                     </table>
@@ -212,7 +220,7 @@
             document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             document.getElementById('page-' + pageId).classList.remove('hidden');
-            if (event) event.target.classList.add('active');
+            if (event && event.target) event.target.classList.add('active');
         }
 
         async function handleFile(e) {
@@ -258,18 +266,31 @@
             const resp = await fetch('/results/' + currentScanId);
             const data = await resp.json();
 
+            // Handle Extraction Status & Fail-Safe Notice
+            const alertElem = document.getElementById('extractionAlert');
+            const scoreElem = document.getElementById('scoreBadge');
+            
+            if (data.has_rootfs === false || data.extraction_status === "FAILED") {
+                alertElem.classList.remove('hidden');
+                scoreElem.innerText = 'N/A';
+                scoreElem.style.color = '#f59e0b';
+            } else {
+                alertElem.classList.add('hidden');
+                scoreElem.innerText = data.security_score + '/100';
+                scoreElem.style.color = data.security_score >= 80 ? '#10b981' : (data.security_score >= 60 ? '#f59e0b' : '#ef4444');
+            }
+
             // Update Stats
             document.getElementById('dashTitle').innerText = data.firmware;
-            document.getElementById('scoreBadge').innerText = data.security_score + '/100';
-            document.getElementById('count-vulns').innerText = data.vulnerability_scan.vulnerabilities.length;
-            document.getElementById('count-malware').innerText = data.malware_analysis.length;
-            document.getElementById('count-secrets').innerText = data.secrets.length;
-            document.getElementById('count-risks').innerText = data.binary_analysis.risks.length;
+            document.getElementById('count-vulns').innerText = (data.vulnerability_scan.vulnerabilities || []).length;
+            document.getElementById('count-malware').innerText = (data.malware_analysis || []).length;
+            document.getElementById('count-secrets').innerText = (data.secrets || []).length;
+            document.getElementById('count-risks').innerText = ((data.binary_analysis || {}).risks || []).length;
 
             // 1. Vulnerabilities
             let vHtml = '';
             let sevData = [0,0,0,0]; // Crit, High, Med, Low
-            data.vulnerability_scan.vulnerabilities.forEach(v => {
+            (data.vulnerability_scan.vulnerabilities || []).forEach(v => {
                 if(v.severity === 'Critical') sevData[0]++;
                 else if(v.severity === 'High') sevData[1]++;
                 else if(v.severity === 'Medium') sevData[2]++;
@@ -285,11 +306,11 @@
                     <div class="remediation-box"><strong>Remediation:</strong> ${v.remediation}</div>
                 </div>`;
             });
-            document.getElementById('vulnList').innerHTML = vHtml || 'Clean system - no CVEs found.';
+            document.getElementById('vulnList').innerHTML = vHtml || (data.has_rootfs === false ? '<span style="color:var(--text-dim)">Unanalyzed (Filesystem unextracted)</span>' : 'Clean system - no CVEs found.');
 
             // 2. Malware
             let mHtml = '';
-            data.malware_analysis.forEach(m => {
+            (data.malware_analysis || []).forEach(m => {
                 mHtml += `
                 <div class="finding-item critical">
                     <strong>${m.malware_family || 'Suspicious Object'}</strong>
@@ -301,7 +322,7 @@
 
             // 3. Hardening
             let hHtml = '<table><thead><tr><th>File</th><th>NX</th><th>PIE</th><th>Canary</th></tr></thead><tbody>';
-            data.hardening_analysis.forEach(h => {
+            (data.hardening_analysis || []).forEach(h => {
                 hHtml += `<tr>
                     <td>${h.file.split('/').pop()}</td>
                     <td>${h.nx ? '✅' : '❌'}</td>
@@ -309,11 +330,11 @@
                     <td>${h.canary ? '✅' : '❌'}</td>
                 </tr>`;
             });
-            document.getElementById('hardeningList').innerHTML = (hHtml + '</tbody></table>') || 'No binaries found.';
+            document.getElementById('hardeningList').innerHTML = (data.hardening_analysis && data.hardening_analysis.length > 0) ? (hHtml + '</tbody></table>') : '<span style="color:var(--text-dim)">No ELF binaries identified.</span>';
 
             // 4. Secrets
             let sHtml = '';
-            data.secrets.forEach(s => {
+            (data.secrets || []).forEach(s => {
                 sHtml += `
                 <div class="finding-item warning">
                     <strong>${s.type}</strong> <span style="background:var(--border); font-size:9px; padding:2px 4px; border-radius:3px; margin-left:10px;">${s.method}</span>
@@ -321,40 +342,62 @@
                     <pre>${s.match}</pre>
                 </div>`;
             });
-            document.getElementById('secretList').innerHTML = sHtml || 'No secrets identified.';
+            document.getElementById('secretList').innerHTML = sHtml || '<span style="color:var(--text-dim)">No secrets identified.</span>';
 
             // 5. Forensics
-            let fHtml = `<div style="margin-bottom:15px; font-size:13px; color:var(--text-dim);"><strong>Signatures:</strong> ${data.binary_analysis.types.join(', ')}</div>`;
-            data.binary_analysis.risks.forEach(r => {
+            const binTypes = (data.binary_analysis && data.binary_analysis.types) || [];
+            const binRisks = (data.binary_analysis && data.binary_analysis.risks) || [];
+            let fHtml = `<div style="margin-bottom:15px; font-size:13px; color:var(--text-dim);"><strong>Structures:</strong> ${binTypes.join(' | ') || 'None'}</div>`;
+            binRisks.forEach(r => {
                 fHtml += `
                 <div class="finding-item">
                     <strong>${r.type}</strong>
                     <div style="font-size:13px; color:var(--text-dim); margin-top:5px;">${r.label}</div>
                 </div>`;
             });
-            document.getElementById('forensicList').innerHTML = fHtml || 'No binary risks identified.';
+            document.getElementById('forensicList').innerHTML = fHtml || '<span style="color:var(--text-dim)">No binary risks identified.</span>';
 
             initChart(sevData);
         }
 
         function initChart(sevData) {
             if (chart) chart.destroy();
+            const total = sevData.reduce((a, b) => a + b, 0);
             const ctx = document.getElementById('riskChart').getContext('2d');
-            chart = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Critical', 'High', 'Medium', 'Low'],
-                    datasets: [{
-                        data: sevData,
-                        backgroundColor: ['#ef4444', '#f59e0b', '#3b82f6', '#10b981'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    cutout: '70%',
-                    plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12 } } }
-                }
-            });
+            
+            if (total === 0) {
+                chart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['No Vulnerabilities'],
+                        datasets: [{
+                            data: [1],
+                            backgroundColor: ['#334155'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        cutout: '70%',
+                        plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12 } } }
+                    }
+                });
+            } else {
+                chart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Critical', 'High', 'Medium', 'Low'],
+                        datasets: [{
+                            data: sevData,
+                            backgroundColor: ['#ef4444', '#f59e0b', '#3b82f6', '#10b981'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        cutout: '70%',
+                        plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12 } } }
+                    }
+                });
+            }
         }
 
         async function loadHistory() {

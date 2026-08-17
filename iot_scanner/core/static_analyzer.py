@@ -34,7 +34,6 @@ class StaticAnalyzer:
         self.findings = []
 
     def check_sensitive_files(self):
-        """Checks for the presence of sensitive files and parses them if possible."""
         logger.info("Checking for sensitive files...")
         for rel_path in SENSITIVE_FILES:
             target_path = os.path.join(self.target_dir, rel_path.lstrip("/"))
@@ -69,7 +68,6 @@ class StaticAnalyzer:
             logger.error(f"Error parsing {rel_path}: {e}")
 
     def check_suspicious_patterns(self):
-        """Smarter Pattern Matching: Greps for explicitly risky strings."""
         logger.info("Scanning for suspicious patterns and dangerous functions...")
         for root, _, files in os.walk(self.target_dir):
             for file in files:
@@ -90,13 +88,12 @@ class StaticAnalyzer:
                                     })
                     except Exception: pass
 
-                # 2. Binary-based dangerous functions (v1.1 addition)
+                # 2. Binary-based dangerous functions 
                 is_binary = any(rel_path.startswith(d) for d in ['bin', 'sbin', 'usr/bin', 'usr/sbin', 'lib'])
                 if is_binary or file.endswith(('.so', '.bin', '.exe')):
                     try:
                         with open(file_path, 'rb') as f:
                             content = f.read(512 * 1024) # Read first 512KB
-                            # Convert to strings for easier searching
                             strings = re.findall(b"[A-Za-z0-9_]{4,}", content)
                             found_funcs = []
                             for s in strings:
@@ -114,7 +111,7 @@ class StaticAnalyzer:
                     except Exception: pass
 
     def run_analysis(self):
-        """Runs all static analysis checks."""
+        
         self.check_sensitive_files()
         self.check_suspicious_patterns()
         logger.info(f"Static analysis completed. Found {len(self.findings)} issues.")

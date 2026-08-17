@@ -4,7 +4,6 @@ from datetime import datetime
 
 class SecurityReport(FPDF):
     def header(self):
-        
         self.set_font('Arial', 'B', 8)
         self.set_text_color(150, 150, 150)
         self.cell(0, 10, 'CONFIDENTIAL - IOT FIRMWARE SECURITY AUDIT REPORT', 0, 0, 'L')
@@ -14,7 +13,6 @@ class SecurityReport(FPDF):
         self.ln(5)
 
     def footer(self):
-        
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
         self.set_text_color(150, 150, 150)
@@ -44,41 +42,42 @@ class SecurityReport(FPDF):
         self.set_text_color(0, 0, 0) 
 
 def calculate_security_score(data):
-    """Calculates a security score from 0 to 100 with improved balancing."""
-    if not data.get('vulnerability_scan', {}).get('components') and \
-       not data.get('secrets') and \
-       not data.get('malware_analysis') and \
-       not data.get('binary_analysis', {}).get('types'):
-        return 50
+    """Calculates a security score from 0 to 100 with fail-safe extraction guards."""
+    extraction_status = data.get('extraction_status', 'SUCCESS')
+    has_rootfs = data.get('has_rootfs', True)
+
+    # Fail-safe guard: If extraction failed or yielded no root filesystem, score is N/A
+    if extraction_status == "FAILED" or not has_rootfs:
+        return "N/A"
 
     score = 100
 
-    # 2. CVE Deductions
+    # 1. CVE Deductions
     cve_deduction = 0
     for vuln in data.get('vulnerability_scan', {}).get('vulnerabilities', []):
-        if vuln['severity'] == 'Critical': cve_deduction += 25
-        elif vuln['severity'] == 'High': cve_deduction += 15
-        elif vuln['severity'] == 'Medium': cve_deduction += 8
+        if vuln.get('severity') == 'Critical': cve_deduction += 25
+        elif vuln.get('severity') == 'High': cve_deduction += 15
+        elif vuln.get('severity') == 'Medium': cve_deduction += 8
         else: cve_deduction += 4
 
     score -= min(70, cve_deduction)
 
-    # 3. Malware Deductions
+    # 2. Malware Deductions
     malware_count = len(data.get('malware_analysis', []))
     score -= min(80, malware_count * 40)
 
-    # 4. Secrets Deductions
+    # 3. Secrets Deductions
     secret_count = len(data.get('secrets', []))
     if secret_count > 0:
         secret_deduction = 5 + (secret_count * 2)
         score -= min(30, secret_deduction)
 
-    # 5. Hardening Deductions
+    # 4. Hardening Deductions
     hardening = data.get('hardening_analysis', [])
     if hardening:
         total_binaries = len(hardening)
-        missing_nx = sum(1 for h in hardening if not h['nx'])
-        missing_pie = sum(1 for h in hardening if not h['pie'])
+        missing_nx = sum(1 for h in hardening if not h.get('nx'))
+        missing_pie = sum(1 for h in hardening if not h.get('pie'))
         hardening_deduction = ((missing_nx + missing_pie) / (2 * total_binaries)) * 15
         score -= hardening_deduction
 
@@ -86,8 +85,16 @@ def calculate_security_score(data):
 
 def generate_pdf_report(data, output_path):
     score = calculate_security_score(data)
-    grade = "A" if score >= 90 else ("B" if score >= 80 else ("C" if score >= 70 else ("D" if score >= 60 else "F")))
-    grade_color = (16, 185, 129) if score >= 80 else ((245, 158, 11) if score >= 60 else (239, 68, 68))
+    extraction_failed = (score == "N/A")
+
+    if extraction_failed:
+        grade = "N/A"
+        grade_color = (245, 158, 11)
+        rating_text = "Overall Security Rating: N/A (Extraction Incomplete)"
+    else:
+        grade = "A" if score >= 90 else ("B" if score >= 80 else ("C" if score >= 70 else ("D" if score >= 60 else "F")))
+        grade_color = (16, 185, 129) if score >= 80 else ((245, 158, 11) if score >= 60 else (239, 68, 68))
+        rating_text = f"Overall Security Rating: {score}/100"
 
     pdf = SecurityReport()
     pdf.alias_nb_pages()
@@ -109,14 +116,14 @@ def generate_pdf_report(data, output_path):
     # Big Grade Circle
     pdf.set_font('Arial', 'B', 60)
     pdf.set_text_color(*grade_color)
-    pdf.cell(0, 40, grade, 0, 1, 'C')
+    pdf.cell(0, 40, str(grade), 0, 1, 'C')
     pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, f'Overall Security Rating: {score}/100', 0, 1, 'C')
+    pdf.cell(0, 10, rating_text, 0, 1, 'C')
 
     pdf.ln(30)
     pdf.set_text_color(100, 100, 100)
     pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 5, f'Target: {data["firmware"]}', 0, 1, 'C')
+    pdf.cell(0, 5, f'Target: {data.get("firmware", "Unknown")}', 0, 1, 'C')
     pdf.cell(0, 5, f'Audit ID: {os.path.basename(os.path.dirname(output_path))}', 0, 1, 'C')
 
     pdf.add_page()
@@ -125,8 +132,22 @@ def generate_pdf_report(data, output_path):
     pdf.section_title('Executive Summary')
     pdf.set_font('Arial', '', 11)
     pdf.set_text_color(0, 0, 0)
-    summary_text = f"This report provides a comprehensive security analysis of the firmware binary '{data['firmware']}'. " \
-                   f"The assessment covered vulnerability scanning, malware detection, secret discovery, and binary hardening analysis."
+    
+    if extraction_failed:
+        pdf.set_fill_color(254, 242, 242)
+        pdf.set_text_color(185, 28, 28)
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(0, 8, ' [!] EXTRACTION NOTICE: FIRMWARE FILESYSTEM UNPARSEABLE', 1, 1, 'L', 1)
+        pdf.set_font('Arial', '', 9)
+        pdf.multi_cell(0, 5, 
+            "The internal root filesystem could not be decompressed. The target file may be encrypted, "
+            "digitally signed, use proprietary vendor headers, or non-standard compression. "
+            "Deep analysis of components, CVEs, secrets, and binary hardening could not be performed.", 1, 'L', 1)
+        pdf.ln(5)
+        pdf.set_text_color(0, 0, 0)
+
+    summary_text = f"This report provides a security analysis of the firmware binary '{data.get('firmware', 'Unknown')}'. " \
+                   f"The assessment covered binary forensics, vulnerability scanning, malware detection, secret discovery, and hardening analysis."
     pdf.multi_cell(0, 6, summary_text)
 
     pdf.ln(5)
@@ -138,11 +159,12 @@ def generate_pdf_report(data, output_path):
     pdf.set_font('Arial', '', 10)
 
     metrics = [
-        ('Total Vulnerabilities (CVEs)', len(data['vulnerability_scan']['vulnerabilities'])),
-        ('Malware / Botnet Indicators', len(data['malware_analysis'])),
-        ('Discovered Secrets & Keys', len(data['secrets'])),
-        ('Static Analysis Findings', len(data['static_analysis'])),
-        ('Binaries Analyzed', len(data['hardening_analysis']))
+        ('Extraction Status', 'Success (RootFS Parsed)' if not extraction_failed else 'Incomplete / Encrypted'),
+        ('Total Vulnerabilities (CVEs)', len(data.get('vulnerability_scan', {}).get('vulnerabilities', []))),
+        ('Malware / Botnet Indicators', len(data.get('malware_analysis', []))),
+        ('Discovered Secrets & Keys', len(data.get('secrets', []))),
+        ('Static Analysis Findings', len(data.get('static_analysis', []))),
+        ('Binaries Analyzed', len(data.get('hardening_analysis', [])))
     ]
     for label, val in metrics:
         pdf.cell(95, 8, label, 1)
@@ -150,7 +172,7 @@ def generate_pdf_report(data, output_path):
 
     # --- MALWARE ANALYSIS ---
     pdf.section_title('Malware & Botnet Analysis', color=(239, 68, 68))
-    if not data['malware_analysis']:
+    if not data.get('malware_analysis'):
         pdf.set_text_color(16, 185, 129)
         pdf.set_font('Arial', 'B', 10)
         pdf.cell(0, 10, 'CLEAN: No known malware or botnet indicators detected.', 0, 1)
@@ -159,9 +181,9 @@ def generate_pdf_report(data, output_path):
             pdf.set_text_color(0, 0, 0)
             pdf.set_font('Arial', 'B', 11)
             family = m.get('malware_family', m.get('summary', 'Suspicious Object'))
-            pdf.cell(0, 8, f'TARGET: {os.path.basename(m["file"])}', 0, 1)
+            pdf.cell(0, 8, f'TARGET: {os.path.basename(m.get("file", "unknown"))}', 0, 1)
             pdf.set_font('Arial', 'I', 9)
-            pdf.cell(0, 5, f'Path: {m["file"]}', 0, 1)
+            pdf.cell(0, 5, f'Path: {m.get("file", "N/A")}', 0, 1)
 
             pdf.set_font('Arial', '', 10)
             if 'detections' in m:
@@ -170,7 +192,7 @@ def generate_pdf_report(data, output_path):
                     pdf.set_text_color(239, 68, 68)
                     pdf.cell(10, 5, '>> ', 0, 0)
                     pdf.set_text_color(0, 0, 0)
-                    pdf.multi_cell(0, 5, f"[{d['method']}] {d['family']}: {d['description']}")
+                    pdf.multi_cell(0, 5, f"[{d.get('method', 'Detection')}] {d.get('family', 'Malware')}: {d.get('description', '')}")
             else:
                 pdf.multi_cell(0, 5, m.get('description', 'Detected via pattern matching'))
             pdf.ln(4)
@@ -178,27 +200,28 @@ def generate_pdf_report(data, output_path):
     # --- VULNERABILITIES ---
     pdf.add_page()
     pdf.section_title('Vulnerability Assessment (CVEs)')
-    if not data['vulnerability_scan']['vulnerabilities']:
+    vulnerabilities = data.get('vulnerability_scan', {}).get('vulnerabilities', [])
+    if not vulnerabilities:
         pdf.cell(0, 10, 'No known vulnerabilities identified for detected components.', 0, 1)
     else:
-        for v in data['vulnerability_scan']['vulnerabilities']:
+        for v in vulnerabilities:
             pdf.set_font('Arial', 'B', 11)
-            pdf.cell(40, 8, v['cve_id'], 0, 0)
-            pdf.draw_severity_badge(v['severity'])
+            pdf.cell(40, 8, v.get('cve_id', 'CVE-Unknown'), 0, 0)
+            pdf.draw_severity_badge(v.get('severity', 'Medium'))
             pdf.set_font('Arial', 'B', 11)
-            pdf.cell(0, 8, f'  {v["component"]} (v{v["version"]})', 0, 1)
+            pdf.cell(0, 8, f'  {v.get("component", "Unknown")} (v{v.get("version", "N/A")})', 0, 1)
 
             pdf.set_font('Arial', '', 10)
-            pdf.multi_cell(0, 5, f"Description: {v['description']}")
+            pdf.multi_cell(0, 5, f"Description: {v.get('description', 'No description available.')}")
 
             pdf.set_fill_color(240, 247, 255)
             pdf.set_font('Arial', 'B', 9)
             pdf.cell(0, 6, ' RECOMMENDED REMEDIATION:', 0, 1, 'L', 1)
             pdf.set_font('Arial', '', 9)
-            pdf.multi_cell(0, 5, v['remediation'], 0, 'L', 1)
+            pdf.multi_cell(0, 5, v.get('remediation', 'Update to latest version.'), 0, 'L', 1)
             pdf.ln(5)
 
-        # --- STATIC ANALYSIS ---
+    # --- STATIC ANALYSIS ---
     pdf.add_page()
     pdf.section_title('Static Analysis Findings', color=(168, 85, 247))
 
@@ -208,53 +231,40 @@ def generate_pdf_report(data, output_path):
         for s in data['static_analysis']:
             pdf.set_font('Arial', 'B', 10)
             pdf.set_text_color(0, 0, 0)
-
-            # File name
             file_name = os.path.basename(s.get('file', 'unknown'))
             pdf.cell(0, 6, f"{s.get('type', 'Issue')} in {file_name}", 0, 1)
-
-            # Path
             pdf.set_font('Arial', '', 8)
             pdf.set_text_color(100, 100, 100)
             pdf.cell(0, 4, f"Path: {s.get('file', 'N/A')}", 0, 1)
-
-            # Description
             pdf.set_text_color(0, 0, 0)
             pdf.set_font('Arial', '', 10)
             pdf.multi_cell(0, 5, f"Description: {s.get('description', 'Suspicious behavior detected')}")
-
-            # Optional severity (if exists)
-            if 'severity' in s:
-                pdf.ln(1)
-                pdf.draw_severity_badge(s['severity'])
-
-            pdf.ln(5)        
+            pdf.ln(3)        
 
     # --- SECRETS ---
     pdf.section_title('Credential & Key Discovery')
-    if not data['secrets']:
+    if not data.get('secrets'):
         pdf.cell(0, 10, 'No hardcoded secrets or private keys identified.', 0, 1)
     else:
         for s in data['secrets']:
             pdf.set_font('Arial', 'B', 10)
-            pdf.cell(0, 6, f"{s['type']} in {os.path.basename(s['file'])}", 0, 1)
+            pdf.cell(0, 6, f"{s.get('type', 'Secret')} in {os.path.basename(s.get('file', 'unknown'))}", 0, 1)
             pdf.set_font('Arial', '', 8)
             pdf.set_text_color(100, 100, 100)
-            pdf.cell(0, 4, f"Path: {s['file']} | Method: {s['method']}", 0, 1)
+            pdf.cell(0, 4, f"Path: {s.get('file', 'N/A')} | Method: {s.get('method', 'N/A')}", 0, 1)
             pdf.set_text_color(0, 0, 0)
             pdf.ln(1)
             pdf.set_font('Courier', '', 8)
             pdf.set_fill_color(245, 245, 245)
-            pdf.multi_cell(0, 4, s['match'].strip()[:200], 1, 'L', 1)
+            pdf.multi_cell(0, 4, s.get('match', '').strip()[:200], 1, 'L', 1)
             pdf.ln(3)
 
     # --- HARDENING ---
     pdf.add_page()
     pdf.section_title('Binary Hardening Analysis')
-    if not data['hardening_analysis']:
+    if not data.get('hardening_analysis'):
         pdf.cell(0, 10, 'No ELF binaries were identified for hardening analysis.', 0, 1)
     else:
-        # Table Header
         pdf.set_fill_color(59, 130, 246)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font('Arial', 'B', 9)
@@ -266,15 +276,14 @@ def generate_pdf_report(data, output_path):
         pdf.set_text_color(0, 0, 0)
         pdf.set_font('Arial', '', 8)
         for h in data['hardening_analysis'][:30]: 
-            pdf.cell(80, 7, f" {os.path.basename(h['file'])}", 1)
-            pdf.set_text_color(16, 185, 129) if h['nx'] else pdf.set_text_color(239, 68, 68)
-            pdf.cell(35, 7, 'ENABLED' if h['nx'] else 'DISABLED', 1, 0, 'C')
-            pdf.set_text_color(16, 185, 129) if h['pie'] else pdf.set_text_color(239, 68, 68)
-            pdf.cell(35, 7, 'ENABLED' if h['pie'] else 'DISABLED', 1, 0, 'C')
-            pdf.set_text_color(16, 185, 129) if h['canary'] else pdf.set_text_color(239, 68, 68)
-            pdf.cell(40, 7, 'PROTECTED' if h['canary'] else 'VULNERABLE', 1, 1, 'C')
+            pdf.cell(80, 7, f" {os.path.basename(h.get('file', 'unknown'))}", 1)
+            pdf.set_text_color(16, 185, 129) if h.get('nx') else pdf.set_text_color(239, 68, 68)
+            pdf.cell(35, 7, 'ENABLED' if h.get('nx') else 'DISABLED', 1, 0, 'C')
+            pdf.set_text_color(16, 185, 129) if h.get('pie') else pdf.set_text_color(239, 68, 68)
+            pdf.cell(35, 7, 'ENABLED' if h.get('pie') else 'DISABLED', 1, 0, 'C')
+            pdf.set_text_color(16, 185, 129) if h.get('canary') else pdf.set_text_color(239, 68, 68)
+            pdf.cell(40, 7, 'PROTECTED' if h.get('canary') else 'VULNERABLE', 1, 1, 'C')
             pdf.set_text_color(0, 0, 0)
 
     pdf.output(output_path)
     return output_path
-

@@ -10,7 +10,7 @@ from iot_scanner.core.vulnerability_scanner import VulnerabilityScanner
 from iot_scanner.core.hardening_analyzer import HardeningAnalyzer
 from iot_scanner.core.malware_scanner import MalwareScanner
 from iot_scanner.core.binary_scanner import BinaryScanner
-from iot_scanner.core.report_generator import generate_pdf_report
+from iot_scanner.core.report_generator import generate_pdf_report, calculate_security_score
 from iot_scanner.core.database import save_scan
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -29,7 +29,8 @@ def scan(firmware_path, output):
     scan_id = str(uuid.uuid4())
     filename = os.path.basename(firmware_path)
     
-    if not os.path.exists(output): os.makedirs(output)
+    if not os.path.exists(output):
+        os.makedirs(output, exist_ok=True)
     extracted_dir = os.path.join(output, "extracted")
     
     try:
@@ -39,17 +40,29 @@ def scan(firmware_path, output):
         bin_results = BinaryScanner(firmware_path).run_scan()
         
         # 1. Extraction
-        extract_firmware(firmware_path, extracted_dir)
+        extraction_meta = extract_firmware(firmware_path, extracted_dir)
+        target_scan_dir = extraction_meta.get("rootfs_dir", extracted_dir)
+        has_rootfs = extraction_meta.get("has_rootfs", False)
+        
+        if not has_rootfs:
+            click.secho(
+                "[!] WARNING: Firmware extraction did not yield a standard Linux root filesystem.\n"
+                "    The image may be encrypted, use proprietary headers, or unsupported compression.",
+                fg="yellow"
+            )
         
         # 2-6. Deep Scanning
-        secrets = SecretScanner(extracted_dir).scan_directory()
-        statics = StaticAnalyzer(extracted_dir).run_analysis()
-        vulns = VulnerabilityScanner(extracted_dir).run_scan()
-        harden = HardeningAnalyzer(extracted_dir).run_analysis()
-        malware = MalwareScanner(extracted_dir).run_scan()
+        secrets = SecretScanner(target_scan_dir).scan_directory() if extraction_meta["total_files"] > 0 else []
+        statics = StaticAnalyzer(target_scan_dir).run_analysis() if has_rootfs else []
+        vulns = VulnerabilityScanner(target_scan_dir).run_scan() if extraction_meta["total_files"] > 0 else {"components": [], "vulnerabilities": []}
+        harden = HardeningAnalyzer(target_scan_dir).run_analysis() if extraction_meta["total_files"] > 0 else []
+        malware = MalwareScanner(target_scan_dir).run_scan() if extraction_meta["total_files"] > 0 else []
         
         final_results = {
             "firmware": filename,
+            "extraction_status": extraction_meta.get("status", "SUCCESS"),
+            "has_rootfs": has_rootfs,
+            "total_files_extracted": extraction_meta.get("total_files", 0),
             "binary_analysis": bin_results,
             "secrets": secrets,
             "static_analysis": statics,
@@ -57,6 +70,8 @@ def scan(firmware_path, output):
             "hardening_analysis": harden,
             "malware_analysis": malware
         }
+        
+        final_results["security_score"] = calculate_security_score(final_results)
         
         # Save Results
         with open(os.path.join(output, "results.json"), 'w') as f:
@@ -69,7 +84,10 @@ def scan(firmware_path, output):
         # Save to DB
         save_scan(scan_id, filename, final_results)
         
-        click.echo(f"[*] Audit Complete! PDF Report: {pdf_path}")
+        score_display = f"{final_results['security_score']}/100" if final_results['security_score'] != "N/A" else "N/A (Extraction Incomplete)"
+        click.echo(f"[*] Audit Complete! Security Score: {score_display}")
+        click.echo(f"[*] PDF Report: {pdf_path}")
+        click.echo(f"[*] Results JSON: {os.path.join(output, 'results.json')}")
         click.echo(f"[*] Scan ID saved to database: {scan_id}")
         
     except Exception as e:
