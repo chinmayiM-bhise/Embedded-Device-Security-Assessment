@@ -12,6 +12,7 @@ from iot_scanner.core.malware_scanner import MalwareScanner
 from iot_scanner.core.binary_scanner import BinaryScanner
 from iot_scanner.core.report_generator import generate_pdf_report, calculate_security_score
 from iot_scanner.core.sbom_generator import generate_cyclonedx_sbom, save_sbom_json
+from iot_scanner.core.compliance import evaluate_owasp_compliance
 from iot_scanner.core.database import save_scan
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -73,6 +74,7 @@ def scan(firmware_path, output):
         }
         
         final_results["security_score"] = calculate_security_score(final_results)
+        final_results["compliance"] = evaluate_owasp_compliance(final_results)
         
         # Save Results JSON
         with open(os.path.join(output, "results.json"), 'w') as f:
@@ -95,7 +97,9 @@ def scan(firmware_path, output):
         save_scan(scan_id, filename, final_results)
         
         score_display = f"{final_results['security_score']}/100" if final_results['security_score'] != "N/A" else "N/A (Extraction Incomplete)"
-        click.echo(f"[*] Audit Complete! Security Score: {score_display}")
+        comp_status = final_results["compliance"].get("status", "UNASSESSED")
+        comp_score = final_results["compliance"].get("compliance_score", "N/A")
+        click.echo(f"[*] Audit Complete! Security Score: {score_display} | OWASP IoT Compliance: {comp_score} ({comp_status})")
         click.echo(f"[*] PDF Report: {pdf_path}")
         click.echo(f"[*] CycloneDX SBOM: {sbom_path}")
         click.echo(f"[*] Results JSON: {os.path.join(output, 'results.json')}")

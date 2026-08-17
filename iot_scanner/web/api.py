@@ -16,6 +16,7 @@ from iot_scanner.core.malware_scanner import MalwareScanner
 from iot_scanner.core.binary_scanner import BinaryScanner
 from iot_scanner.core.report_generator import generate_pdf_report, calculate_security_score
 from iot_scanner.core.sbom_generator import generate_cyclonedx_sbom, save_sbom_json
+from iot_scanner.core.compliance import evaluate_owasp_compliance
 from iot_scanner.core.database import save_scan, get_all_scans
 
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +69,7 @@ def run_scan_task(scan_id: str, firmware_path: str, filename: str):
         }
         
         final_results["security_score"] = calculate_security_score(final_results)
+        final_results["compliance"] = evaluate_owasp_compliance(final_results)
 
         # Generate Enterprise PDF Report
         pdf_path = os.path.join(output_dir, "report.pdf")

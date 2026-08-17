@@ -11,6 +11,8 @@ from iot_scanner.core.hardening_analyzer import HardeningAnalyzer
 from iot_scanner.core.extractor import extract_firmware, validate_rootfs
 from iot_scanner.core.report_generator import calculate_security_score
 from iot_scanner.core.cve_client import CVEClient
+from iot_scanner.core.cisa_kev import CISAKEVClient
+from iot_scanner.core.compliance import evaluate_owasp_compliance
 from iot_scanner.core.sbom_generator import generate_cyclonedx_sbom
 from create_mock_firmware import create_mock_firmware
 
@@ -71,11 +73,8 @@ def test_yara_threat_suite(tmp_path):
     threat_dir = tmp_path / "threats"
     threat_dir.mkdir()
     
-    # 1. Mirai sample
     (threat_dir / "mirai_bot").write_bytes(b"POST /cdn-cgi/ listen 0.0.0.0: X-Target: 192.168.1.1 X-Token: abc")
-    # 2. Gafgyt sample
     (threat_dir / "gafgyt_bot").write_bytes(b"Gafgyt BASHLITE PING PONG SCANNER ON")
-    # 3. Mozi sample
     (threat_dir / "mozi_bot").write_bytes(b"[hpldf] [ss] 8:count64: d1:ad2:id20:")
 
     scanner = MalwareScanner(str(threat_dir))
@@ -118,7 +117,6 @@ def test_nested_archive_extraction(tmp_path):
     inner_dir.mkdir()
     create_mock_firmware(str(inner_dir))
     
-    # Pack inner into inner.zip
     inner_zip = tmp_path / "inner.zip"
     with zipfile.ZipFile(inner_zip, 'w') as zf:
         for root, _, files in os.walk(inner_dir):
@@ -126,7 +124,6 @@ def test_nested_archive_extraction(tmp_path):
                 p = os.path.join(root, file)
                 zf.write(p, os.path.relpath(p, inner_dir))
 
-    # Pack inner.zip into outer.zip
     outer_zip = tmp_path / "outer.zip"
     with zipfile.ZipFile(outer_zip, 'w') as zf:
         zf.write(inner_zip, "inner_payload.zip")
@@ -154,9 +151,40 @@ def test_cve_client_and_cache():
     client = CVEClient(cache_ttl_days=1)
     vulns = client.get_vulnerabilities("BusyBox", "1.33.1")
     assert len(vulns) > 0
-    # Second retrieval should hit cache
     cached_vulns = client.get_vulnerabilities("BusyBox", "1.33.1")
     assert len(cached_vulns) == len(vulns)
+
+def test_cisa_kev_catalog():
+    """Test CISA KEV detection for actively weaponized CVEs."""
+    kev_client = CISAKEVClient()
+    assert kev_client.is_known_exploited("CVE-2022-30065") is True
+    assert kev_client.is_known_exploited("CVE-2014-0160") is True
+    assert kev_client.is_known_exploited("CVE-FAKE-9999-0000") is False
+    meta = kev_client.get_kev_details("CVE-2022-30065")
+    assert meta is not None
+    assert "BusyBox" in meta["vendor"]
+
+def test_owasp_compliance_evaluator():
+    """Test OWASP IoT Top 10 compliance engine."""
+    mock_results = {
+        "has_rootfs": True,
+        "extraction_status": "SUCCESS",
+        "secrets": [{"type": "Google API Key", "file": "etc/config"}],
+        "static_analysis": [{"type": "Sensitive File", "file": "etc/shadow"}],
+        "vulnerability_scan": {
+            "components": [{"name": "BusyBox", "version": "1.33.1"}],
+            "vulnerabilities": [{"cve_id": "CVE-2022-30065", "severity": "Critical", "component": "BusyBox"}]
+        },
+        "hardening_analysis": [{"file": "bin/busybox", "nx": False, "canary": False, "dangerous_functions": []}],
+        "malware_analysis": []
+    }
+    compliance = evaluate_owasp_compliance(mock_results)
+    assert compliance["status"] in ["COMPLIANT", "PARTIAL", "NON_COMPLIANT"]
+    assert len(compliance["categories"]) == 8
+    cat_ids = [c["id"] for c in compliance["categories"]]
+    assert "I1" in cat_ids
+    assert "I4" in cat_ids
+    assert "I6" in cat_ids
 
 def test_sbom_generator():
     """Test CycloneDX 1.5 SBOM JSON generation."""
@@ -201,5 +229,4 @@ def test_hardening_analyzer_architecture():
     """Test HardeningAnalyzer on workspace."""
     analyzer = HardeningAnalyzer(TEST_DIR)
     findings = analyzer.run_analysis()
-    # At least test directory should be analyzed without errors
     assert isinstance(findings, list)

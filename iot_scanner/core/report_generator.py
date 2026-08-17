@@ -30,15 +30,18 @@ class SecurityReport(FPDF):
     def draw_severity_badge(self, severity):
         colors = {
             'Critical': (239, 68, 68),
+            'CISA KEV': (220, 38, 38),
             'High': (245, 158, 11),
             'Medium': (59, 130, 246),
-            'Low': (16, 185, 129)
+            'Low': (16, 185, 129),
+            'PASS': (16, 185, 129),
+            'FAIL': (239, 68, 68)
         }
         color = colors.get(severity, (150, 150, 150))
         self.set_fill_color(*color)
         self.set_text_color(255, 255, 255)
         self.set_font('Arial', 'B', 8)
-        self.cell(20, 5, severity.upper(), 0, 0, 'C', 1)
+        self.cell(22, 5, severity.upper(), 0, 0, 'C', 1)
         self.set_text_color(0, 0, 0) 
 
 def calculate_security_score(data):
@@ -55,7 +58,8 @@ def calculate_security_score(data):
     # 1. CVE Deductions
     cve_deduction = 0
     for vuln in data.get('vulnerability_scan', {}).get('vulnerabilities', []):
-        if vuln.get('severity') == 'Critical': cve_deduction += 25
+        if vuln.get('is_cisa_kev'): cve_deduction += 35
+        elif vuln.get('severity') == 'Critical': cve_deduction += 25
         elif vuln.get('severity') == 'High': cve_deduction += 15
         elif vuln.get('severity') == 'Medium': cve_deduction += 8
         else: cve_deduction += 4
@@ -147,7 +151,7 @@ def generate_pdf_report(data, output_path):
         pdf.set_text_color(0, 0, 0)
 
     summary_text = f"This report provides a security analysis of the firmware binary '{data.get('firmware', 'Unknown')}'. " \
-                   f"The assessment covered binary forensics, vulnerability scanning, malware detection, secret discovery, and hardening analysis."
+                   f"The assessment covered binary forensics, vulnerability scanning, malware detection, secret discovery, hardening analysis, and OWASP compliance."
     pdf.multi_cell(0, 6, summary_text)
 
     pdf.ln(5)
@@ -158,8 +162,12 @@ def generate_pdf_report(data, output_path):
     pdf.cell(95, 10, 'Result', 1, 1, 'L', 1)
     pdf.set_font('Arial', '', 10)
 
+    comp_info = data.get("compliance", {})
+    comp_score_str = comp_info.get("compliance_score", "N/A")
+
     metrics = [
         ('Extraction Status', 'Success (RootFS Parsed)' if not extraction_failed else 'Incomplete / Encrypted'),
+        ('OWASP IoT (2024) Compliance', comp_score_str),
         ('Total Vulnerabilities (CVEs)', len(data.get('vulnerability_scan', {}).get('vulnerabilities', []))),
         ('Malware / Botnet Indicators', len(data.get('malware_analysis', []))),
         ('Discovered Secrets & Keys', len(data.get('secrets', []))),
@@ -170,7 +178,35 @@ def generate_pdf_report(data, output_path):
         pdf.cell(95, 8, label, 1)
         pdf.cell(95, 8, str(val), 1, 1)
 
+    # --- OWASP COMPLIANCE AUDIT ---
+    if comp_info and comp_info.get("categories"):
+        pdf.ln(5)
+        pdf.section_title('OWASP IoT Top 10 (2024) Compliance Audit', color=(14, 116, 144))
+        pdf.set_font('Arial', 'B', 9)
+        pdf.set_fill_color(241, 245, 249)
+        pdf.cell(20, 8, 'ID', 1, 0, 'C', 1)
+        pdf.cell(100, 8, 'Category & Description', 1, 0, 'L', 1)
+        pdf.cell(30, 8, 'Status', 1, 0, 'C', 1)
+        pdf.cell(40, 8, 'Findings', 1, 1, 'C', 1)
+
+        pdf.set_font('Arial', '', 8)
+        for cat in comp_info["categories"]:
+            pdf.cell(20, 7, cat["id"], 1, 0, 'C')
+            pdf.cell(100, 7, f" {cat['title'][:45]}", 1, 0, 'L')
+            if cat["status"] == "PASS":
+                pdf.set_text_color(16, 185, 129)
+                pdf.cell(30, 7, 'COMPLIANT', 1, 0, 'C')
+            elif cat["status"] == "FAIL":
+                pdf.set_text_color(239, 68, 68)
+                pdf.cell(30, 7, 'VIOLATION', 1, 0, 'C')
+            else:
+                pdf.set_text_color(150, 150, 150)
+                pdf.cell(30, 7, 'N/A', 1, 0, 'C')
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(40, 7, str(cat["findings_count"]), 1, 1, 'C')
+
     # --- MALWARE ANALYSIS ---
+    pdf.add_page()
     pdf.section_title('Malware & Botnet Analysis', color=(239, 68, 68))
     if not data.get('malware_analysis'):
         pdf.set_text_color(16, 185, 129)
@@ -180,7 +216,6 @@ def generate_pdf_report(data, output_path):
         for m in data['malware_analysis']:
             pdf.set_text_color(0, 0, 0)
             pdf.set_font('Arial', 'B', 11)
-            family = m.get('malware_family', m.get('summary', 'Suspicious Object'))
             pdf.cell(0, 8, f'TARGET: {os.path.basename(m.get("file", "unknown"))}', 0, 1)
             pdf.set_font('Arial', 'I', 9)
             pdf.cell(0, 5, f'Path: {m.get("file", "N/A")}', 0, 1)
@@ -199,17 +234,29 @@ def generate_pdf_report(data, output_path):
 
     # --- VULNERABILITIES ---
     pdf.add_page()
-    pdf.section_title('Vulnerability Assessment (CVEs)')
+    pdf.section_title('Vulnerability Assessment (CVEs & CISA KEV)')
     vulnerabilities = data.get('vulnerability_scan', {}).get('vulnerabilities', [])
     if not vulnerabilities:
         pdf.cell(0, 10, 'No known vulnerabilities identified for detected components.', 0, 1)
     else:
         for v in vulnerabilities:
             pdf.set_font('Arial', 'B', 11)
-            pdf.cell(40, 8, v.get('cve_id', 'CVE-Unknown'), 0, 0)
-            pdf.draw_severity_badge(v.get('severity', 'Medium'))
+            pdf.cell(45, 8, v.get('cve_id', 'CVE-Unknown'), 0, 0)
+            
+            if v.get('is_cisa_kev'):
+                pdf.draw_severity_badge('CISA KEV')
+            else:
+                pdf.draw_severity_badge(v.get('severity', 'Medium'))
+
             pdf.set_font('Arial', 'B', 11)
             pdf.cell(0, 8, f'  {v.get("component", "Unknown")} (v{v.get("version", "N/A")})', 0, 1)
+
+            if v.get('is_cisa_kev'):
+                pdf.set_fill_color(254, 242, 242)
+                pdf.set_text_color(185, 28, 28)
+                pdf.set_font('Arial', 'B', 8)
+                pdf.cell(0, 5, ' [!] CISA KEV: Actively weaponized and exploited in the wild!', 1, 1, 'L', 1)
+                pdf.set_text_color(0, 0, 0)
 
             pdf.set_font('Arial', '', 10)
             pdf.multi_cell(0, 5, f"Description: {v.get('description', 'No description available.')}")
@@ -290,13 +337,12 @@ def generate_pdf_report(data, output_path):
             pdf.cell(30, 7, h.get('relro', 'None').upper(), 1, 1, 'C')
             pdf.set_text_color(0, 0, 0)
 
-            # Print dangerous symbols if present
             dangerous = h.get('dangerous_functions', [])
             if dangerous:
                 pdf.set_font('Arial', 'I', 7)
                 pdf.set_text_color(185, 28, 28)
                 func_names = [f"{d['function']} ({d['category']})" for d in dangerous]
-                pdf.cell(0, 4, f"   >> Unsafe Imported Libc Calls: {', '.join(func_names)}", 0, 1)
+                pdf.cell(0, 4, f"   >> Unsafe Libc Calls: {', '.join(func_names)}", 0, 1)
                 pdf.set_font('Arial', '', 8)
                 pdf.set_text_color(0, 0, 0)
 
