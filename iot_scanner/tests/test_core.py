@@ -7,6 +7,7 @@ from iot_scanner.core.static_analyzer import StaticAnalyzer
 from iot_scanner.core.vulnerability_scanner import VulnerabilityScanner
 from iot_scanner.core.malware_scanner import MalwareScanner
 from iot_scanner.core.binary_scanner import BinaryScanner
+from iot_scanner.core.hardening_analyzer import HardeningAnalyzer
 from iot_scanner.core.extractor import extract_firmware, validate_rootfs
 from iot_scanner.core.report_generator import calculate_security_score
 from iot_scanner.core.cve_client import CVEClient
@@ -65,6 +66,26 @@ def test_malware_scanner():
     assert any("bot.sh" in f["file"] for f in findings)
     assert any(any(d["method"] == "Heuristic" for d in f.get("detections", [])) for f in findings)
 
+def test_yara_threat_suite(tmp_path):
+    """Test YARA rule detections across Mirai, Gafgyt, and Mozi."""
+    threat_dir = tmp_path / "threats"
+    threat_dir.mkdir()
+    
+    # 1. Mirai sample
+    (threat_dir / "mirai_bot").write_bytes(b"POST /cdn-cgi/ listen 0.0.0.0: X-Target: 192.168.1.1 X-Token: abc")
+    # 2. Gafgyt sample
+    (threat_dir / "gafgyt_bot").write_bytes(b"Gafgyt BASHLITE PING PONG SCANNER ON")
+    # 3. Mozi sample
+    (threat_dir / "mozi_bot").write_bytes(b"[hpldf] [ss] 8:count64: d1:ad2:id20:")
+
+    scanner = MalwareScanner(str(threat_dir))
+    findings = scanner.run_scan()
+    assert len(findings) >= 3
+    all_families = [f["malware_family"] for f in findings]
+    assert any("Mirai" in fam for fam in all_families)
+    assert any("Gafgyt" in fam for fam in all_families)
+    assert any("Mozi" in fam for fam in all_families)
+
 def test_vulnerability_scanner():
     """Test that software components and CVEs are identified."""
     scanner = VulnerabilityScanner(TEST_DIR)
@@ -97,6 +118,7 @@ def test_nested_archive_extraction(tmp_path):
     inner_dir.mkdir()
     create_mock_firmware(str(inner_dir))
     
+    # Pack inner into inner.zip
     inner_zip = tmp_path / "inner.zip"
     with zipfile.ZipFile(inner_zip, 'w') as zf:
         for root, _, files in os.walk(inner_dir):
@@ -104,6 +126,7 @@ def test_nested_archive_extraction(tmp_path):
                 p = os.path.join(root, file)
                 zf.write(p, os.path.relpath(p, inner_dir))
 
+    # Pack inner.zip into outer.zip
     outer_zip = tmp_path / "outer.zip"
     with zipfile.ZipFile(outer_zip, 'w') as zf:
         zf.write(inner_zip, "inner_payload.zip")
@@ -173,3 +196,10 @@ def test_package_manifest_parser(tmp_path):
     comp_names = [c["name"] for c in scanner.components]
     assert "dnsmasq" in comp_names
     assert "dropbear" in comp_names
+
+def test_hardening_analyzer_architecture():
+    """Test HardeningAnalyzer on workspace."""
+    analyzer = HardeningAnalyzer(TEST_DIR)
+    findings = analyzer.run_analysis()
+    # At least test directory should be analyzed without errors
+    assert isinstance(findings, list)

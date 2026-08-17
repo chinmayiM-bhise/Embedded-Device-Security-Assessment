@@ -348,14 +348,21 @@
             });
             document.getElementById('malwareList').innerHTML = mHtml || '<div class="badge-success badge">No Malware Detected</div>';
 
-            // 4. Hardening
-            let hHtml = '<table><thead><tr><th>File</th><th>NX</th><th>PIE</th><th>Canary</th></tr></thead><tbody>';
+            // 4. Hardening & Dynamic Symbol Analysis
+            let hHtml = '<table><thead><tr><th>Binary</th><th>Architecture</th><th>NX</th><th>PIE</th><th>Canary</th><th>RELRO</th></tr></thead><tbody>';
             (data.hardening_analysis || []).forEach(h => {
+                const fname = h.file.split('/').pop();
+                const dangerous = (h.dangerous_functions || []).map(d => `<span class="badge badge-danger" style="margin: 2px 4px 2px 0;">${d.function} (${d.category})</span>`).join('');
                 hHtml += `<tr>
-                    <td>${h.file.split('/').pop()}</td>
+                    <td>
+                        <strong>${fname}</strong>
+                        ${dangerous ? `<div style="margin-top: 4px;">${dangerous}</div>` : ''}
+                    </td>
+                    <td><span class="badge" style="background:var(--border); font-size:10px;">${h.arch || 'ELF'}</span></td>
                     <td>${h.nx ? '✅' : '❌'}</td>
                     <td>${h.pie ? '✅' : '❌'}</td>
                     <td>${h.canary ? '✅' : '❌'}</td>
+                    <td><span class="badge" style="background:${h.relro === 'Full' ? 'rgba(16, 185, 129, 0.2); color:#10b981' : (h.relro === 'Partial' ? 'rgba(245, 158, 11, 0.2); color:#f59e0b' : 'rgba(239, 68, 68, 0.2); color:#ef4444')}">${h.relro || 'None'}</span></td>
                 </tr>`;
             });
             document.getElementById('hardeningList').innerHTML = (data.hardening_analysis && data.hardening_analysis.length > 0) ? (hHtml + '</tbody></table>') : '<span style="color:var(--text-dim)">No ELF binaries identified.</span>';

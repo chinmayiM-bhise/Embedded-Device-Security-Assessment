@@ -268,22 +268,37 @@ def generate_pdf_report(data, output_path):
         pdf.set_fill_color(59, 130, 246)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font('Arial', 'B', 9)
-        pdf.cell(80, 8, ' Binary File', 1, 0, 'L', 1)
-        pdf.cell(35, 8, ' NX', 1, 0, 'C', 1)
-        pdf.cell(35, 8, ' PIE', 1, 0, 'C', 1)
-        pdf.cell(40, 8, ' Stack Canary', 1, 1, 'C', 1)
+        pdf.cell(70, 8, ' Binary File (Arch)', 1, 0, 'L', 1)
+        pdf.cell(30, 8, ' NX', 1, 0, 'C', 1)
+        pdf.cell(30, 8, ' PIE', 1, 0, 'C', 1)
+        pdf.cell(30, 8, ' Canary', 1, 0, 'C', 1)
+        pdf.cell(30, 8, ' RELRO', 1, 1, 'C', 1)
 
         pdf.set_text_color(0, 0, 0)
         pdf.set_font('Arial', '', 8)
-        for h in data['hardening_analysis'][:30]: 
-            pdf.cell(80, 7, f" {os.path.basename(h.get('file', 'unknown'))}", 1)
+        for h in data['hardening_analysis'][:25]:
+            fname = os.path.basename(h.get('file', 'unknown'))
+            arch_badge = h.get('arch', 'ELF')
+            pdf.cell(70, 7, f" {fname[:18]} ({arch_badge[:12]})", 1)
             pdf.set_text_color(16, 185, 129) if h.get('nx') else pdf.set_text_color(239, 68, 68)
-            pdf.cell(35, 7, 'ENABLED' if h.get('nx') else 'DISABLED', 1, 0, 'C')
+            pdf.cell(30, 7, 'ENABLED' if h.get('nx') else 'DISABLED', 1, 0, 'C')
             pdf.set_text_color(16, 185, 129) if h.get('pie') else pdf.set_text_color(239, 68, 68)
-            pdf.cell(35, 7, 'ENABLED' if h.get('pie') else 'DISABLED', 1, 0, 'C')
+            pdf.cell(30, 7, 'ENABLED' if h.get('pie') else 'DISABLED', 1, 0, 'C')
             pdf.set_text_color(16, 185, 129) if h.get('canary') else pdf.set_text_color(239, 68, 68)
-            pdf.cell(40, 7, 'PROTECTED' if h.get('canary') else 'VULNERABLE', 1, 1, 'C')
+            pdf.cell(30, 7, 'PROTECTED' if h.get('canary') else 'VULNERABLE', 1, 0, 'C')
+            pdf.set_text_color(16, 185, 129) if h.get('relro') == 'Full' else (pdf.set_text_color(245, 158, 11) if h.get('relro') == 'Partial' else pdf.set_text_color(239, 68, 68))
+            pdf.cell(30, 7, h.get('relro', 'None').upper(), 1, 1, 'C')
             pdf.set_text_color(0, 0, 0)
+
+            # Print dangerous symbols if present
+            dangerous = h.get('dangerous_functions', [])
+            if dangerous:
+                pdf.set_font('Arial', 'I', 7)
+                pdf.set_text_color(185, 28, 28)
+                func_names = [f"{d['function']} ({d['category']})" for d in dangerous]
+                pdf.cell(0, 4, f"   >> Unsafe Imported Libc Calls: {', '.join(func_names)}", 0, 1)
+                pdf.set_font('Arial', '', 8)
+                pdf.set_text_color(0, 0, 0)
 
     pdf.output(output_path)
     return output_path
